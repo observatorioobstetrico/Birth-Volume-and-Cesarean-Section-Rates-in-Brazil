@@ -1,0 +1,286 @@
+---
+title: "Birth Volume and Cesarean Delivery Rates in Brazil — analyses of the Supplementary Material"
+subtitle: "Revised manuscript IJG-D-26-02002: Supplementary Tables S1–S9 and Figures S1–S2"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    self_contained: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center", dpi = 150)
+```
+
+## Packages, helpers and data
+
+```{r packages}
+library(readr); library(dplyr); library(tidyr); library(ggplot2); library(cowplot); library(lme4); library(knitr)
+fmt  <- function(x, d = 1) formatC(x, format = "f", digits = d, big.mark = ",")
+n_   <- function(x) formatC(x, format = "d", big.mark = ",")
+pval <- function(p) ifelse(p < 0.001, "<0.001", sprintf("%.3f", p))
+NAVY <- "#1f3864"; RED <- "#a33a3a"
+tema <- theme_classic(base_size = 11) +
+  theme(panel.grid.major.y = element_line(colour = "#eeeeee"),
+        plot.title = element_text(colour = NAVY, hjust = 0.5, size = 11), axis.text = element_text(colour = "black"))
+YEARS <- c(2018, 2019, 2022, 2023, 2024)
+ctrl  <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+conv  <- function(m) if (is.null(m@optinfo$conv$lme4$messages)) "OK" else paste(m@optinfo$conv$lme4$messages, collapse = "; ")
+
+# data/facility_years.csv: one row per facility-year with >=1 live birth in the study years (SINASC), without volume restriction
+BANDS <- c("100 - 499", "500 - 999", "1000 - 1499", "1500 - 1999", ">1999")
+fyall <- read_csv("data/facility_years.csv", col_types = cols(cnes = "c", cod_mun = "c"))
+allf <- fyall |> mutate(rate = 100 * cesareans / live_births)
+# Eligible facility-years (>=100 live births); `included` = complete cases used in the main model
+eleg <- fyall |> filter(eligible) |>
+  mutate(included = included_main_model,
+         volume_band = as.character(cut(live_births, c(100, 500, 1000, 1500, 2000, Inf), right = FALSE, labels = BANDS)))
+d <- eleg |> filter(included) |> mutate(rate = 100 * cesareans / live_births)
+# Facilities with births in the excluded pandemic years (SINASC; used only in the flowchart)
+fy <- tibble(year = c(2018, 2019, 2020, 2021, 2022, 2023, 2024),
+             facilities_with_births = c(5531, 5500, 5501, 5549, 5566, 5456, 5368))
+stopifnot(all(fy$facilities_with_births[fy$year %in% YEARS] == as.integer(table(allf$year))))
+stopifnot(nrow(d) == 12104, nrow(allf) == 27421, all(sort(unique(allf$year)) == YEARS))
+```
+
+# S1. Study sample
+
+## Figure S1. Flowchart of the selection of facility-years
+
+```{r figS1, fig.width = 9, fig.height = 10}
+n_total <- sum(fy$facilities_with_births)
+n_pand  <- sum(fy$facilities_with_births[fy$year %in% c(2020, 2021)])
+n_lt100 <- sum(allf$live_births < 100)
+excl    <- eleg |> filter(!included)
+n_beds  <- sum(is.na(excl$beds))
+stopifnot(n_total - n_pand == nrow(allf), nrow(allf) - n_lt100 == nrow(eleg))
+bands <- table(factor(d$volume_band, c("100 - 499", "500 - 999", "1000 - 1499", "1500 - 1999", ">1999")))
+caixas <- tibble::tribble(
+  ~x, ~y, ~w, ~h, ~borda, ~fundo, ~negrito, ~rotulo,
+  33, 93, 40, 9, NAVY, "white", FALSE, sprintf("Facility-years with ≥1 live birth\n(SINASC/CNES, 2018–2024)\nn = %s", n_(n_total)),
+  33, 72, 40, 9, NAVY, "white", FALSE, sprintf("Facility-years in the study years\n(2018, 2019, 2022, 2023, 2024)\nn = %s", n_(n_total - n_pand)),
+  33, 51, 40, 9, NAVY, "white", FALSE, sprintf("Eligible facility-years\n(≥100 live births)\nn = %s", n_(nrow(eleg))),
+  33, 30, 40, 11, NAVY, "#eef3fa", TRUE, sprintf("Included facility-years\nn = %s\n%s distinct facilities\n%s live births",
+                                                 n_(nrow(d)), n_(n_distinct(d$cnes)), n_(sum(d$live_births))),
+  78, 82.5, 40, 7.5, RED, "white", FALSE, sprintf("Excluded: pandemic years\n2020 and 2021\nn = %s", n_(n_pand)),
+  78, 61.5, 40, 7.5, RED, "white", FALSE, sprintf("Excluded: <100 live births\nn = %s", n_(n_lt100)),
+  78, 40.5, 40, 12.5, RED, "white", FALSE, sprintf("Excluded: missing covariate data\nn = %s\nFunding source (no registered beds): %s\nCase-mix indicators: %s",
+                                                  n_(nrow(excl)), n_(n_beds), n_(nrow(excl) - n_beds))) |>
+  bind_rows(tibble(x = c(10, 30, 50, 70, 90), y = 8.5, w = 16, h = 7, borda = NAVY, fundo = "white", negrito = FALSE,
+                   rotulo = sprintf("%s\nn = %s", c("100–499", "500–999", "1000–1499", "1500–1999", "≥2000"), n_(as.integer(bands)))))
+setas <- tibble::tribble(~x, ~y, ~xend, ~yend, 33, 88.5, 33, 76.5, 33, 67.5, 33, 55.5, 33, 46.5, 33, 35.5,
+                         33, 82.5, 58, 82.5, 33, 61.5, 58, 61.5, 33, 40.5, 58, 40.5) |>
+  bind_rows(tibble(x = c(10, 30, 50, 70, 90), y = 17, xend = c(10, 30, 50, 70, 90), yend = 12))
+ggplot() +
+  geom_segment(data = tibble::tribble(~x, ~y, ~xend, ~yend, 33, 24.5, 33, 17, 10, 17, 90, 17),
+               aes(x, y, xend = xend, yend = yend), colour = NAVY, linewidth = 0.5) +
+  geom_segment(data = setas, aes(x, y, xend = xend, yend = yend), colour = NAVY, linewidth = 0.5,
+               arrow = arrow(length = unit(2, "mm"), type = "closed")) +
+  geom_rect(data = caixas, aes(xmin = x - w / 2, xmax = x + w / 2, ymin = y - h / 2, ymax = y + h / 2),
+            fill = caixas$fundo, colour = caixas$borda, linewidth = 0.5) +
+  geom_text(data = caixas, aes(x, y, label = rotulo, fontface = ifelse(negrito, "bold", "plain")),
+            size = ifelse(caixas$borda == RED, 3.0, 3.2), lineheight = 1.05) +
+  annotate("text", x = 50, y = 2, label = "Included facility-years by annual live births", size = 3, colour = "#444444") +
+  coord_cartesian(xlim = c(1, 99), ylim = c(0, 98), expand = FALSE) + theme_void()
+```
+
+## Table S1. Facilities with live births by year
+
+```{r tabS1}
+s1 <- allf |> group_by(Year = year) |>
+  summarise(`Facilities with births, n` = n(), `≥100 births (eligible), n` = sum(live_births >= 100),
+            `<100 births (excluded), n` = sum(live_births < 100), .groups = "drop") |>
+  left_join(d |> count(Year = year, name = "Included in models (complete cases), n"), by = "Year") |>
+  select(Year, `Facilities with births, n`, `≥100 births (eligible), n`, `Included in models (complete cases), n`, `<100 births (excluded), n`)
+s1 <- bind_rows(s1 |> mutate(Year = as.character(Year)),
+                s1 |> summarise(across(-Year, sum)) |> mutate(Year = "Total (facility-years)"))
+kable(s1 |> mutate(across(-Year, n_)))
+```
+
+# S2. Rationale for the threshold of 100 live births per year
+
+```{r bands}
+BRK <- c(0, 10, 25, 50, 100, 200, 500, 1000, 2000, Inf)
+LAB <- c("1–9", "10–24", "25–49", "50–99", "100–199", "200–499", "500–999", "1000–1999", "≥2000")
+allf <- allf |> mutate(bin = cut(live_births, BRK, right = FALSE, labels = LAB))
+```
+
+## Table S2. Distribution of facility-years and cesarean rates by annual volume band (study years pooled)
+
+```{r tabS2}
+s2 <- allf |> group_by(`Live births per year` = bin) |>
+  summarise(n = n(), b = sum(live_births), pz = 100 * mean(cesareans == 0), med = median(rate),
+            w = 100 * sum(cesareans) / sum(live_births), .groups = "drop") |>
+  transmute(`Live births per year`, `Facility-years, n` = n_(n), `Live births, n` = n_(b),
+            `% of facility-years` = fmt(100 * n / sum(n)), `% with no cesarean` = fmt(pz),
+            `Median rate, %` = fmt(med), `Birth-weighted rate, %` = fmt(w))
+kable(s2)
+tibble(`Facility-years with ≥1 live birth` = n_(nrow(allf)),
+       `with ≥100 live births` = sprintf("%s (%s%%)", n_(sum(allf$live_births >= 100)), fmt(100 * mean(allf$live_births >= 100))),
+       `% of live births in facilities with ≥100` = fmt(100 * sum(allf$live_births[allf$live_births >= 100]) / sum(allf$live_births)),
+       `100–199 band: facility-years with ≥1 cesarean, %` = fmt(100 * mean(allf$cesareans[allf$bin == "100–199"] > 0))) |>
+  pivot_longer(everything(), names_to = "Item", values_to = "Value") |> kable()
+```
+
+## Table S3. Birth-weighted cesarean rate (%) by annual volume band and year
+
+```{r tabS3}
+s3 <- allf |> group_by(bin, year) |> summarise(w = 100 * sum(cesareans) / sum(live_births), .groups = "drop")
+kable(s3 |> mutate(w = fmt(w)) |> pivot_wider(names_from = year, values_from = w) |> rename(`Live births per year` = bin))
+```
+
+## Table S4. Effect of alternative volume thresholds (study years pooled)
+
+```{r tabS4}
+s4 <- bind_rows(lapply(c(25, 50, 75, 100, 150, 200, 300), function(k) {
+  keep <- allf$live_births >= k
+  tibble(`Threshold (births/year)` = paste0("≥", k),
+         `Facilities per year, mean` = n_(round(sum(keep) / length(YEARS))),
+         `% of facilities retained` = fmt(100 * mean(keep)),
+         `% of births retained` = fmt(100 * sum(allf$live_births[keep]) / sum(allf$live_births)),
+         `% with no cesarean among excluded` = fmt(100 * mean(allf$cesareans[!keep] == 0)),
+         `Median rate above threshold, %` = fmt(median(allf$rate[keep])))
+}))
+kable(s4)
+```
+
+## Table S5. Follow-up of facilities with fewer than 100 live births in 2019 and 2024
+
+```{r tabS5}
+coorte <- function(ref) {
+  ids <- allf$cnes[allf$year == ref & allf$live_births < 100]
+  cc  <- allf |> filter(cnes %in% ids)
+  sempre <- cc |> group_by(cnes) |> summarise(s = all(live_births < 100), .groups = "drop")
+  r <- allf |> filter(year == ref, cnes %in% ids)
+  resumo <- tibble(Cohort = ref, n = n_(length(ids)), `Always <100 births, %` = fmt(100 * mean(sempre$s)),
+                   `Median births in reference year` = median(r$live_births), `Mean` = fmt(mean(r$live_births)),
+                   `1–24 births, %` = fmt(100 * mean(r$live_births < 25)), `75–99 births, %` = fmt(100 * mean(r$live_births >= 75)))
+  tab <- cc |> group_by(Year = year) |>
+    summarise(`Facilities in the cohort with births, n` = n_(n()), `Still <100 births, %` = fmt(100 * mean(live_births < 100)),
+              `Median births in the year` = median(live_births), .groups = "drop") |> mutate(Cohort = ref, .before = 1)
+  list(resumo = resumo, tab = tab)
+}
+c19 <- coorte(2019); c24 <- coorte(2024)
+kable(bind_rows(c19$resumo, c24$resumo))
+kable(bind_rows(c19$tab, c24$tab))
+```
+
+## Figure S2. Cesarean rate and facility-years with no cesarean by volume band
+
+```{r figS2, fig.width = 11, fig.height = 4.8}
+fs2 <- allf |> group_by(year, bin) |>
+  summarise(w = 100 * sum(cesareans) / sum(live_births), z = 100 * mean(cesareans == 0), .groups = "drop") |>
+  mutate(year = factor(year))
+pal <- setNames(c("#9ecae1", "#6baed6", "#3182bd", "#08519c", "#08306b"), YEARS)
+painel <- function(y, ylab, titulo)
+  ggplot(fs2, aes(bin, .data[[y]], colour = year, group = year)) +
+    annotate("rect", xmin = 4.5, xmax = 9.5, ymin = -Inf, ymax = Inf, fill = "#eef3fa") +
+    geom_vline(xintercept = 4.5, linetype = "dashed", colour = "grey50") +
+    geom_line(linewidth = 0.6) + geom_point(size = 1.8) +
+    scale_colour_manual(values = pal, name = "Year") + scale_y_continuous(limits = c(0, 100)) +
+    labs(x = "Annual live births", y = ylab, title = titulo) + tema + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+plot_grid(painel("w", "Birth-weighted cesarean rate (%)", "(a) Cesarean rate by volume band") + theme(legend.position = "none"),
+          painel("z", "Facility-years with no cesarean delivery (%)", "(b) Facility-years with no cesarean"),
+          ncol = 2, rel_widths = c(1, 1.18), align = "h", axis = "bt")
+```
+
+# S3. Additional model results
+
+```{r prep-models}
+COMB <- c("SUS No" = "Public (SUS), not accredited", "SUS Yes" = "Public (SUS), accredited",
+          "Misto No" = "Mixed, not accredited", "Misto Yes" = "Mixed, accredited", "Privado No" = "Private, not accredited")
+dm <- d |> mutate(comb = relevel(factor(COMB[paste(beds, high_risk)], COMB), ref = "Public (SUS), not accredited"),
+                  typ = relevel(factor(typology), ref = "Rural"), obs = factor(row_number()))
+```
+
+## Table S6. Funding source among accredited facilities, by year
+
+```{r tabS6}
+hab <- dm |> filter(high_risk == "Yes")
+s6 <- hab |> count(Year = year, beds) |> pivot_wider(names_from = beds, values_from = n, values_fill = 0) |>
+  mutate(Year = as.character(Year))
+s6 <- bind_rows(s6, s6 |> summarise(across(-Year, sum)) |> mutate(Year = "Total"))
+if (!"Privado" %in% names(s6)) s6$Privado <- 0
+s6 |> mutate(Total = SUS + Misto + Privado,
+             `Public (SUS), n (%)` = sprintf("%s (%s)", n_(SUS), fmt(100 * SUS / Total)),
+             `Mixed, n (%)` = sprintf("%s (%s)", n_(Misto), fmt(100 * Misto / Total)),
+             `Private, n (%)` = sprintf("%s (%s)", n_(Privado), fmt(100 * Privado / Total)),
+             `Total, n` = n_(Total)) |>
+  select(Year, `Public (SUS), n (%)`, `Mixed, n (%)`, `Private, n (%)`, `Total, n`) |> kable()
+hab |> count(`Annual live births` = factor(volume_band, c("100 - 499", "500 - 999", "1000 - 1499", "1500 - 1999", ">1999"))) |>
+  mutate(`%` = fmt(100 * n / sum(n))) |> kable(caption = "Accredited facility-years by annual live births (table footnote)")
+```
+
+## Table S7. Annual volume as a continuous exposure (log2 scale)
+
+Same model as Table 3 of the main text, with log2-transformed annual volume in place of the volume categories.
+
+```{r tabS7}
+m7 <- glmer(cbind(cesareans, live_births - cesareans) ~ log2(live_births) + comb + typ + hdi_state + pct_black_brown +
+              pct_previous_cesarean + (1 | cod_mun) + (1 | uf) + (1 | obs), data = dm, family = binomial, control = ctrl)
+cat("Convergence:", conv(m7), "\n")
+co <- summary(m7)$coefficients
+tibble(term = rownames(co), b = co[, 1], se = co[, 2], p = co[, 4]) |> filter(term != "(Intercept)") |>
+  mutate(k = ifelse(term == "hdi_state", 0.1, 1), dig = ifelse(grepl("^pct_", term), 3, 2),
+         OR = mapply(fmt, exp(b * k), dig),
+         `95% CI` = paste0(mapply(fmt, exp((b - 1.96 * se) * k), dig), "–", mapply(fmt, exp((b + 1.96 * se) * k), dig)),
+         `p-value` = pval(p),
+         term = term |> recode(`log2(live_births)` = "Annual live births, per doubling", hdi_state = "State HDI (per 0.1)",
+                               pct_black_brown = "Black or brown mothers, % (per 1 percentage point)",
+                               pct_previous_cesarean = "Mothers with a previous cesarean, % (per 1 percentage point)") |>
+           sub("^comb", "", x = _) |> sub("^typ", "Municipal typology: ", x = _)) |>
+  select(Predictor = term, OR, `95% CI`, `p-value`) |> kable()
+```
+
+## Table S8. Facility type × high-risk accreditation within each annual volume band (unadjusted)
+
+For each band with accredited facilities (≥500 annual births), binomial model with the combined variable as the only
+predictor and an observation-level random effect for overdispersion. Comparisons: accredited vs non-accredited public
+(SUS) facilities, and accredited vs non-accredited mixed facilities (contrast between the two coefficients).
+
+```{r tabS8}
+s8 <- bind_rows(lapply(c("500 - 999", "1000 - 1499", "1500 - 1999", ">1999"), function(f) {
+  df <- dm |> filter(volume_band == f) |> droplevels() |> mutate(comb = relevel(comb, ref = "Public (SUS), not accredited"))
+  desc <- df |> group_by(comb) |> summarise(n = n(), w = 100 * sum(cesareans) / sum(live_births), .groups = "drop")
+  m <- glmer(cbind(cesareans, live_births - cesareans) ~ comb + (1 | obs), data = df, family = binomial, control = ctrl)
+  b <- fixef(m); V <- as.matrix(vcov(m))
+  ct <- function(pos, neg = NULL) { L <- setNames(rep(0, length(b)), names(b)); L[pos] <- 1; if (!is.null(neg)) L[neg] <- -1
+    e <- sum(L * b); s <- sqrt(drop(t(L) %*% V %*% L)); c(exp(e), exp(e - 1.96 * s), exp(e + 1.96 * s), 2 * pnorm(-abs(e / s))) }
+  a <- ct("combPublic (SUS), accredited"); mm <- ct("combMixed, accredited", "combMixed, not accredited")
+  tibble(`Annual live births` = f,
+         `Counts n (birth-weighted rate %)` = paste(sprintf("%s: %s (%s)", desc$comb, n_(desc$n), fmt(desc$w)), collapse = "; "),
+         `Public accredited vs public not accredited` = sprintf("%.2f (%.2f–%.2f), p %s", a[1], a[2], a[3], pval(a[4])),
+         `Mixed accredited vs mixed not accredited` = sprintf("%.2f (%.2f–%.2f), p %s", mm[1], mm[2], mm[3], pval(mm[4])),
+         Convergence = conv(m))
+}))
+kable(s8)
+```
+
+## Table S9. Sensitivity analysis including facilities with fewer than 100 annual live births
+
+Facility-years of `data/facility_years.csv` with `in_sensitivity = TRUE`: all facility-years with at least one live birth in the study years and complete data
+for the reduced model (funding source and accreditation are not available in CNES for many of the smallest facilities).
+The same reduced model fitted to facility-years with at least 100 live births is shown for comparison.
+
+```{r tabS9}
+sens <- fyall |> filter(in_sensitivity) |>
+  mutate(band = relevel(factor(cut(live_births, c(0, 100, 500, 1000, 1500, 2000, Inf), right = FALSE,
+                                   labels = c("<100", "100–499", "500–999", "1000–1499", "1500–1999", "≥2000"))), ref = "≥2000"),
+         typ = relevel(factor(typology), ref = "Rural"))
+f9 <- cbind(cesareans, live_births - cesareans) ~ band + typ + hdi_state + pct_black_brown + pct_previous_cesarean +
+  (1 | cod_mun) + (1 | uf) + (1 | obs)
+fit9 <- function(df) glmer(f9, data = df |> mutate(obs = factor(row_number())), family = binomial, control = ctrl)
+mT <- fit9(sens); m1 <- fit9(sens |> filter(live_births >= 100) |> droplevels() |> mutate(band = relevel(band, ref = "≥2000")))
+tid <- function(m, amostra) { co <- summary(m)$coefficients; k <- grepl("^band", rownames(co))
+  tibble(Sample = sprintf("%s (n = %s)", amostra, n_(nobs(m))), `Annual live births` = sub("band", "", rownames(co)[k]),
+         OR = fmt(exp(co[k, 1]), 2), `95% CI` = paste0(fmt(exp(co[k, 1] - 1.96 * co[k, 2]), 2), "–", fmt(exp(co[k, 1] + 1.96 * co[k, 2]), 2)),
+         `p-value` = pval(co[k, 4]), Convergence = conv(m)) }
+kable(bind_rows(tid(mT, "All facility-years with ≥1 live birth"), tid(m1, "Facility-years with ≥100 live births")))
+```
+
+## Session information
+
+```{r session}
+sessionInfo()
+```
